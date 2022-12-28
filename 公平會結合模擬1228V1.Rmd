@@ -1,0 +1,170 @@
+---
+title: "公平會: 家樂福與統一超商結合模擬"
+date: "`r format(Sys.Date(), ' %Y 年 %m 月 %d 日')`"
+output: 
+  html_document:
+  css: style.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options("scipen"=100, "digits"=4)
+## load packages
+library(knitr)
+library(writexl)
+library(readxl)
+library(data.table)
+library(dplyr)
+library(DT)
+library(rlist)
+library(ggplot2)
+library(reshape2)
+library(ggthemes)
+#library(showtext) # for Mac
+```
+
+
+
+```{r read data, echo=FALSE}
+setwd("C:/Users/d32562/OneDrive - 財團法人台灣經濟研究院/111計畫/其它/公平會/模型/R程式")
+inp_da=data.frame(read_excel("INPUT_TABLE.xlsx", col_names =TRUE,na="",skip=0))
+inp_da=inp_da[-c(1,6),]
+rownames(inp_da)<-NULL
+#datatable(format(inp_da),caption="表1: 結合前市場資料 ", options = list(pageLength =nrow(inp_da),dom = 't')) %>% formatPercentage(c("市占"), 1)
+```
+
+
+## **計量需求模型估計結果 - (I) 價格取自CPI**
+```{r parameter}
+# Estimator
+e_a=0.0193866
+```
+
+
+
+## **結合模擬均衡價格估算**:
+```{r tables, echo=FALSE}
+alpha=e_a
+
+## 結合前需求彈性與邊際成本之估計
+X=inp_da[,c("項目","市占","平均價格")]
+Y=data.table()
+Y[,"項目"]=X[,1]
+Y[,"需求彈性"]=-alpha*X[,3]*(1-X[,2])
+Y[,"交叉彈性"]=alpha*X[,3]*X[,2]
+Y[,"利潤率"]=-1/Y[,"需求彈性"]
+Y[,"邊際成本"]=(1-Y[,"利潤率"])*X[,3]
+datatable(format(Y),caption="表1: 結合前需求彈性與邊際成本之估計 ", options = list(pageLength =nrow(Y),
+      initComplete = JS(
+      "function(settings, json) {",
+      "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});","}"),
+      dom = 't'))%>% formatPercentage(c("利潤率"), 1)
+
+## 結合後之各廠價格變動
+X=merge(inp_da,Y)
+X=X[c(2:4,1),]
+# 收益比例
+pro_rat_C=X[2,"市占"]/X[1,"市占"]
+pro_rat_P=1/pro_rat_C
+
+### 參與結合廠商
+mer_Y=data.table()
+mer_Y[,"項目"]=X[1:2,1]
+mer_Y[,"收益比"]=c(pro_rat_C,pro_rat_P)
+k_1=X[1,"需求彈性"]*X[2,"需求彈性"]-X[1,"交叉彈性"]*X[2,"交叉彈性"]
+mer_Y[1,"預期利潤率"]=(-X[2,"需求彈性"]+X[1,"交叉彈性"]*mer_Y[1,"收益比"])/k_1
+mer_Y[2,"預期利潤率"]=(-X[1,"需求彈性"]+X[2,"交叉彈性"]*mer_Y[2,"收益比"])/k_1
+mer_Y[,"預期價格"]=X[1:2,"邊際成本"]/(1-mer_Y[,"預期利潤率"])
+mer_Y[,"價格上漲幅度"]=mer_Y[,"預期價格"]-X[1:2,"平均價格"]
+mer_Y[,"預期價格漲幅百分比"]=mer_Y[,"預期價格"]/X[1:2,"平均價格"]-1
+datatable(format(mer_Y),caption="表2: 結合後之各廠商價格變動-參與結合廠商 ", options = list(pageLength =nrow(mer_Y),
+      initComplete = JS(
+      "function(settings, json) {",
+      "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});","}"),
+      dom = 't')) %>% 
+formatStyle('預期價格漲幅百分比',  color = 'red', backgroundColor = 'pink', fontWeight = 'bold')%>% formatPercentage(c("預期利潤率","預期價格漲幅百分比"), 1)
+  
+### 未參與結合廠商
+otr_Y=data.table()
+otr_Y[,"項目"]=X[-c(1:2),1]
+k_2=sum(X[,"市占"]*mer_Y[,"價格上漲幅度"])
+otr_Y[,"市占率預期增加"]=alpha*X[-c(1:2),"市占"]*k_2
+otr_Y[,"預期新價格"]=-X[-c(1:2),"需求彈性"]/(alpha*(1-X[-c(1:2),"市占"]-otr_Y[,"市占率預期增加"]))
+otr_Y[,"預期價格漲幅百分比"]=otr_Y[,"預期新價格"]/X[-c(1:2),"平均價格"]-1
+datatable(format(otr_Y),caption="表3: 結合後之各廠商價格變動-未參與結合廠商 ", options = list(pageLength =nrow(otr_Y),
+      initComplete = JS(
+      "function(settings, json) {",
+      "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});","}"),
+      dom = 't'))%>% formatPercentage(c("市占率預期增加","預期價格漲幅百分比"), 1) 
+```
+註: 假設結合前後際邊成本與結合廠商營收比不變。
+
+### **結合模擬分析說明**:
+
+家樂福與統一廠商結合後，預期家樂福的價格將上漲 `r sprintf("%0.1f%%", mer_Y[1,"預期價格漲幅百分比"] * 100)`，統一超商的預期價格將上漲 `r sprintf("%0.1f%%", mer_Y[2,"預期價格漲幅百分比"] * 100)`;
+
+基於SSNIP檢定中「小幅但顯著且持續提價的要件，多數採用5%~10%提價」為標準，故本實驗結合廠商家樂福高達`r sprintf("%0.1f%%", mer_Y[1,"預期價格漲幅百分比"] * 100)`的上漲率，已經顯著的具有市場力量，**初步判定不允許其結合**。
+
+
+## **模擬參數的影響**:
+### 需求模式估計式對結合後價格上漲的影響
+```{r simulation, echo=FALSE}
+EX=seq(e_a-0.005,e_a+0.03,by=0.002)
+PX=list()
+X=inp_da[,c("項目","市占","平均價格")]
+# 收益比例
+pro_rat_C=X[2,"市占"]/X[1,"市占"]
+pro_rat_P=1/pro_rat_C
+
+for(i in seq_along(EX)){
+a=EX[i]
+
+## 結合前需求彈性與邊際成本之估計
+Ys=data.table()
+Ys[,"項目"]=X[,1]
+Ys[,"需求彈性"]=-a*X[,3]*(1-X[,2])
+Ys[,"交叉彈性"]=a*X[,3]*X[,2]
+Ys[,"利潤率"]=-1/Ys[,"需求彈性"]
+Ys[,"邊際成本"]=(1-Ys[,"利潤率"])*X[,3]
+
+## 結合後之各廠價格變動
+Xs=data.table(merge(inp_da,Ys))
+Xs=Xs[c(2:4,1),]
+
+### 參與結合廠商
+mer_Ys=data.table()
+mer_Ys[,"項目"]=Xs[1:2,1]
+mer_Ys[,"收益比"]=c(pro_rat_C,pro_rat_P)
+k_1=Xs[1,"需求彈性"]*Xs[2,"需求彈性"]-Xs[1,"交叉彈性"]*Xs[2,"交叉彈性"]
+mer_Ys[1,"預期利潤率"]=(-Xs[2,"需求彈性"]+Xs[1,"交叉彈性"]*mer_Ys[1,"收益比"])/k_1
+mer_Ys[2,"預期利潤率"]=(-Xs[1,"需求彈性"]+Xs[2,"交叉彈性"]*mer_Ys[2,"收益比"])/k_1
+mer_Ys[,"預期價格"]=Xs[1:2,"邊際成本"]/(1-mer_Ys[,"預期利潤率"])
+mer_Ys[,"價格上漲幅度"]=mer_Ys[,"預期價格"]-Xs[1:2,"平均價格"]
+mer_Ys[,"預期價格漲幅百分比"]=mer_Ys[,"預期價格"]/Xs[1:2,"平均價格"]-1
+PX[[i]]=mer_Ys[,c("項目","預期價格漲幅百分比")]
+
+### 未參與結合廠商
+otr_Ys=data.table()
+otr_Ys[,"項目"]=Xs[-c(1:2),1]
+k_2=sum(Xs[1:2,"市占"]*mer_Ys[,"價格上漲幅度"])
+otr_Ys[,"市占率預期增加"]=a*Xs[-c(1:2),"市占"]*k_2
+otr_Ys[,"預期新價格"]=-Xs[-c(1:2),"需求彈性"]/(a*(1-Xs[-c(1:2),"市占"]-otr_Ys[,"市占率預期增加"]))
+otr_Ys[,"預期價格漲幅百分比"]=otr_Ys[,"預期新價格"]/Xs[-c(1:2),"平均價格"]-1
+}
+```
+
+
+```{r 資料整理, echo=FALSE}
+m.data=data.frame(估計參數=rep(EX,each=2),rbindlist(PX))
+names(m.data)[2]="參與結合廠商"
+#m.data[,2]=sprintf("%0.4f%%", m.data[,2] * 100)
+```
+
+
+```{r 模擬參數路徑, echo=FALSE}
+X=m.data
+X[,"預期價格漲幅百分比"]=X[,"預期價格漲幅百分比"]*100
+ggplot(data =X, aes(x=估計參數, y=預期價格漲幅百分比)) + geom_point()+geom_hline(yintercept =10,linetype='dotted')+ geom_line(aes(colour=參與結合廠商))+ylab("結合後預期價格上漲(%)")+xlab("估計參數")+theme_classic()
+datatable(format(m.data),options = list(pageLength =nrow(X)))%>%formatPercentage(c("預期價格漲幅百分比"), 1) 
+```
+
